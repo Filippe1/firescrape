@@ -23,6 +23,6 @@ def find_company_website(company_name):
     return None
 
 # Example usage
-company_name = "Example Company"
+company_name = "microsoft"
 website = find_company_website(company_name)
 print(f"Website: {website}")

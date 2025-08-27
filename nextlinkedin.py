@@ -12,7 +12,7 @@ def search_bing_with_safari(query, num_pages=1):
 
     try:
         # Go to Bing
-        driver.get("https://www.bing.com")
+        driver.get("https://www.google.com")
 
         # Find the search box and enter the query
         search_box = driver.find_element(By.NAME, "q")
