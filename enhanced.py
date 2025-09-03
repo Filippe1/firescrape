@@ -124,7 +124,11 @@ def search_bing_with_safari(query, num_pages=1):
         # Add slight delay before pressing enter
         time.sleep(random.uniform(0.5, 1.5))
         search_box.send_keys(Keys.RETURN)
-
+         #2. PAUSE THE SCRIPT - Wait for user input
+        #input("Please manually log in, solve any CAPTCHAs, and press Enter in this terminal to continue...")
+        print('fix captcha now')
+        time.sleep(30)
+        print('resuming')
         # Wait for results with explicit condition
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h2 a")))
         time.sleep(random.uniform(2, 4))
