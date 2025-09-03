@@ -88,10 +88,13 @@ def search_bing_with_safari(query, num_pages=1):
         time.sleep(random.uniform(1, 3))
         
         # Go to Bing
-        driver.get("https://www.bing.com")
+        driver.get("https://www.google.com/maps")
         
         # Wait for page to load
         time.sleep(random.uniform(2, 4))
+
+        buttong = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Accept all']")))
+        buttong.click()
 
         # Find search box with multiple selectors
         search_selectors = [
@@ -126,9 +129,9 @@ def search_bing_with_safari(query, num_pages=1):
         search_box.send_keys(Keys.RETURN)
          #2. PAUSE THE SCRIPT - Wait for user input
         #input("Please manually log in, solve any CAPTCHAs, and press Enter in this terminal to continue...")
-        print('fix captcha now')
-        time.sleep(30)
-        print('resuming')
+        #print('fix captcha now')
+        #time.sleep(30)
+        #print('resuming')
         # Wait for results with explicit condition
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h2 a")))
         time.sleep(random.uniform(2, 4))
@@ -206,7 +209,7 @@ def search_bing_with_safari(query, num_pages=1):
 def main():
     # Search queries (rotate to avoid patterns)
     queries = [
-        "site:linkedin.com/in/ manager",
+        "restaurant",
         "site:linkedin.com/in/ \"project manager\"",
         "site:linkedin.com/in/ \"senior manager\"",
         "site:linkedin.com/in/ \"product manager\"",
