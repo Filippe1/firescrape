@@ -3,6 +3,7 @@ from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 import time
 # Function to scroll to bottom
 def scroll_to_bottom(driver, pause_time=2):
@@ -52,5 +53,17 @@ for link in links:
 
 # Print all URLs
 print(urls)
+
+time.sleep(1)
+
+
+# Wait until the button is clickable
+next_button = WebDriverWait(driver, 10).until(
+    EC.element_to_be_clickable((By.CSS_SELECTOR, 'g-right-button[aria-label="Next"]'))
+)
+
+# Scroll into view and click
+driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+ActionChains(driver).move_to_element(next_button).click().perform()
 
 
