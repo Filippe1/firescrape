@@ -88,13 +88,20 @@ def search_bing_with_safari(query, num_pages=1):
         time.sleep(random.uniform(1, 3))
         
         # Go to Bing
-        driver.get("https://www.google.com/maps")
+        driver.get("https://www.google.com/search?q=restaurant+sodermalm")
         
         # Wait for page to load
         time.sleep(random.uniform(2, 4))
+        print(driver.session_id)
+        print(driver.command_executor._url)
 
-        buttong = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Accept all']")))
+        buttong = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[.//div[text()='Accept all']]")))
+        driver.execute_script("arguments[0].scrollIntoView(true);", buttong)
         buttong.click()
+
+        #buttong = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Accept all']")))
+        
+        #buttong.click()
 
         # Find search box with multiple selectors
         search_selectors = [
