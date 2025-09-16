@@ -25,10 +25,13 @@ urls = list(dict.fromkeys(urls))
 
 print(f"✅ Loaded {len(urls)} URLs from {folder_path}")
 
+
+#urls = ['https://hermans.se/', 'http://www.mamawolf.nu/', 'https://www.kvarnen.com/?utm_source=google']
+
 # exit()
 
 # Regex for emails
-email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+email_pattern = re.compile(r"/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g")
 
 # Settings
 MAX_PAGES = 30   # limit depth per site to avoid endless crawling
@@ -55,10 +58,15 @@ def scrape_site(base_url):
         visited.add(url)
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Extract text and search for emails
-        text = soup.get_text()
-        emails = set(re.findall(email_pattern, text))
+        # Extract emails directly from the HTML
+        html_content = str(soup)
+        emails = set(re.findall(email_pattern, html_content))
         found_emails.update(emails)
+
+        # Optional: Also check for mailto links
+        for mailto in soup.select('a[href^=mailto]'):
+            mail_email = mailto['href'].replace("mailto:", "").split('?')[0]
+            found_emails.add(mail_email)
 
         # Extract internal links
         for a_tag in soup.find_all("a", href=True):
