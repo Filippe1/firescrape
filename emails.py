@@ -1,117 +1,292 @@
-import requests
-from bs4 import BeautifulSoup
-import re
-from urllib.parse import urljoin, urlparse
 import os
 import csv
+import re
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urljoin, urlparse
 
-folder_path = "fireout"
+import requests
+from bs4 import BeautifulSoup
+
+# -------------------------
+# SETTINGS
+# -------------------------
+
+INPUT_FOLDER = "datacold"
+OUTPUT_FOLDER = "emailsout"
+
+MAX_PAGES = 5
+TIMEOUT = 10
+MAX_WORKERS = 30
+
+CONTACT_KEYWORDS = [
+    "contact",
+    "kontakt",
+    "about",
+    "om",
+    "team",
+    "staff",
+    "support",
+    "customer",
+]
+
+EMAIL_REGEX = re.compile(
+    r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+)
+
+# -------------------------
+# SHARED SESSION
+# -------------------------
+
+session = requests.Session()
+
+session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0 Safari/537.36"
+    )
+})
+
+# -------------------------
+# LOAD URLS
+# -------------------------
+
 urls = []
 
-# Loop through all CSV files in the folder
-for filename in os.listdir(folder_path):
-    if filename.endswith(".csv"):
-        file_path = os.path.join(folder_path, filename)
-        with open(file_path, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)  # skip header if present
-            for row in reader:
-                if row:  # avoid empty rows
-                    urls.append(row[0])  # first column = URL
+for filename in os.listdir(INPUT_FOLDER):
+    if not filename.endswith(".csv"):
+        continue
 
-print(f"✅ Loaded {len(urls)} URLs from {folder_path} , will now remove duplicates")
+    file_path = os.path.join(INPUT_FOLDER, filename)
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+
+        headers = next(reader, None)
+
+        if not headers:
+            continue
+
+        website_columns = [
+            idx
+            for idx, col in enumerate(headers)
+            if "website" in col.lower()
+        ]
+
+        if not website_columns:
+            continue
+
+        for row in reader:
+            for idx in website_columns:
+                if idx < len(row):
+                    url = row[idx].strip()
+
+                    if url:
+                        urls.append(url)
 
 urls = list(dict.fromkeys(urls))
 
-print(f"✅ Loaded {len(urls)} URLs from {folder_path}")
+print(f"✅ Loaded {len(urls)} unique URLs")
 
-
-#urls = ['https://hermans.se/', 'http://www.mamawolf.nu/', 'https://www.kvarnen.com/?utm_source=google']
-
-# exit()
-
-# Regex for emails
-email_pattern = re.compile(r"/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g")
-
-# Settings
-MAX_PAGES = 30   # limit depth per site to avoid endless crawling
-TIMEOUT = 20
+# -------------------------
+# SCRAPER
+# -------------------------
 
 def scrape_site(base_url):
-    visited = set()
-    to_visit = [base_url]
     found_emails = set()
-    domain = urlparse(base_url).netloc
+
+    try:
+        parsed = urlparse(base_url)
+
+        if not parsed.scheme:
+            base_url = "https://" + base_url
+
+        domain = urlparse(base_url).netloc
+
+    except Exception:
+        return found_emails
+
+    visited = set()
+    to_visit = deque([base_url])
 
     while to_visit and len(visited) < MAX_PAGES:
-        url = to_visit.pop(0)
+
+        url = to_visit.popleft()
 
         if url in visited:
             continue
 
+        visited.add(url)
+
         try:
-            response = requests.get(url, timeout=TIMEOUT)
-            response.raise_for_status()
-        except requests.RequestException:
+            response = session.get(
+                url,
+                timeout=TIMEOUT,
+                allow_redirects=True,
+            )
+
+            if response.status_code != 200:
+                continue
+
+            html = response.text
+
+        except Exception:
             continue
 
-        visited.add(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+        # ---------------------------------
+        # FIND EMAILS IN RAW HTML
+        # ---------------------------------
 
-        # Extract emails directly from the HTML
-        html_content = str(soup)
-        emails = set(re.findall(email_pattern, html_content))
+        emails = set(EMAIL_REGEX.findall(html))
+
+        # Remove obvious junk emails
+        emails = {
+            e for e in emails
+            if not e.lower().endswith(
+                (
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".webp",
+                    ".svg",
+                )
+            )
+        }
+
         found_emails.update(emails)
 
-        # Optional: Also check for mailto links
-        for mailto in soup.select('a[href^=mailto]'):
-            mail_email = mailto['href'].replace("mailto:", "").split('?')[0]
-            found_emails.add(mail_email)
+        # mailto links
+        if "mailto:" in html.lower():
 
-        # Extract internal links
-        for a_tag in soup.find_all("a", href=True):
-            link = urljoin(base_url, a_tag["href"])
-            parsed_link = urlparse(link)
+            soup = BeautifulSoup(html, "html.parser")
 
-            # Stay inside the same domain
-            if parsed_link.netloc == domain and link not in visited:
-                to_visit.append(link)
+            for a in soup.select('a[href^="mailto:"]'):
+                email = (
+                    a["href"]
+                    .replace("mailto:", "")
+                    .split("?")[0]
+                    .strip()
+                )
+
+                if email:
+                    found_emails.add(email)
+
+        # If we found emails already, stop crawling
+        if found_emails:
+            break
+
+        # ---------------------------------
+        # FIND CONTACT PAGES
+        # ---------------------------------
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        for a in soup.find_all("a", href=True):
+
+            href = a["href"]
+
+            href_lower = href.lower()
+
+            if not any(
+                keyword in href_lower
+                for keyword in CONTACT_KEYWORDS
+            ):
+                continue
+
+            try:
+                full_url = urljoin(url, href)
+
+                parsed_link = urlparse(full_url)
+
+                if parsed_link.netloc != domain:
+                    continue
+
+                if full_url not in visited:
+                    to_visit.append(full_url)
+
+            except Exception:
+                pass
 
     return found_emails
 
-# Run scraper
+# -------------------------
+# RUN CONCURRENTLY
+# -------------------------
+
 results = {}
-for site in urls:
-    print(f"🔎 Scraping {site} ...")
-    emails = scrape_site(site)
-    results[site] = emails
-    print(f"✅ Found {len(emails)} emails on {site}")
 
-# Print results
-for site, emails in results.items():
-    print(f"\n{site}:")
-    for email in emails:
-        print("  -", email)
+print(f"🚀 Starting scrape using {MAX_WORKERS} workers...")
 
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
-# Now store in csv file
+    futures = {
+        executor.submit(scrape_site, site): site
+        for site in urls
+    }
 
-# Ensure folder exists
-folder_path = "emailsout"
-os.makedirs(folder_path, exist_ok=True)
+    completed = 0
 
-# Output file
-output_file = os.path.join(folder_path, "scraped_emails.csv")
+    for future in as_completed(futures):
 
-# Write results to CSV
-with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+        site = futures[future]
+
+        try:
+            emails = future.result()
+
+            results[site] = emails
+
+            completed += 1
+
+            print(
+                f"[{completed}/{len(urls)}] "
+                f"✅ {site} -> {len(emails)} emails"
+            )
+
+        except Exception as e:
+
+            completed += 1
+
+            print(
+                f"[{completed}/{len(urls)}] "
+                f"❌ {site} -> {e}"
+            )
+
+# -------------------------
+# SAVE RESULTS
+# -------------------------
+
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+output_file = os.path.join(
+    OUTPUT_FOLDER,
+    "scraped_emails.csv"
+)
+
+with open(
+    output_file,
+    "w",
+    newline="",
+    encoding="utf-8"
+) as csvfile:
+
     writer = csv.writer(csvfile)
-    writer.writerow(["site", "emails"])  # header
-    
-    for site, emails in results.items():
-        if emails:
-            writer.writerow([site, ", ".join(emails)])
-        else:
-            writer.writerow([site, ""])  # empty if no emails found
 
-print(f"✅ Emails saved to {output_file}")
+    writer.writerow([
+        "site",
+        "emails"
+    ])
+
+    for site, emails in results.items():
+
+        writer.writerow([
+            site,
+            ", ".join(sorted(emails))
+        ])
+
+print(f"\n✅ Finished")
+print(f"✅ Results saved to: {output_file}")
+print(
+    f"✅ Sites scraped: {len(results)}"
+)
